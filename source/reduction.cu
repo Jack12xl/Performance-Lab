@@ -93,22 +93,35 @@ __global__ void reduce_stage0(const float* d_idata, float* d_odata, int n)
     extern __shared__ float smem[];
 
     // Calculate 1D Index
-    int idx = 0;
+    int idx = blockDim.x * blockIdx.x + threadIdx.x;
 
     // Copy input data to shared memory
     // Note: Use block index for shared memory
     // Also check for bounds
+    if (idx < n) {
+        smem[threadIdx.x] = d_idata[idx];
+    }
 
     // Where do we need to put __syncthreads()? Do we need it at all?
+    __syncthreads();
 
     // Reduce within block
     // Start from c = 1, upto block size, each time doubling the offset
+    for (int c = 1; c < blockDim.x; c *= 2) {
+        if (threadIdx.x % (2 * c) == 0) {
+            smem[threadIdx.x] += smem[threadIdx.x + c];
+        }
+        __syncthreads();
+    }
 
     // Copy result of reduction to global memory
     // Which index of d_odata do we write to?
     // In which index of smem is the result stored?
     // Do we need another syncthreads before writing to global memory?
     // Use only one thread to write to global memory
+    if (threadIdx.x == 0) {
+        d_odata[blockIdx.x] = smem[0];
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
