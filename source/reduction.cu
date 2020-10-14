@@ -139,13 +139,27 @@ __global__ void reduce_stage1(const float* d_idata, float* d_odata, int n)
 
     extern __shared__ float smem[];
 
-    int idx = 0;
+    int idx = blockDim.x * blockIdx.x + threadIdx.x;
 
+    if (idx < n) {
+        smem[threadIdx.x] = d_idata[idx];
+    }
     // This is the part that differes from reduce_stage0
     // Reduce within block with coalesced indexing pattern
     // Change the for-loop to use indexing that reduces warp-divergence
+    for (int c = 1; c < blockDim.x; c *= 2) {
+        int index = threadIdx.x * 2 * c;
+        
+        if (index + c < blockDim.x) {
+            smem[index] += smem[index + c];
+        }
+        __syncthreads();
+    }
 
     // Copy result of reduction to global memory - Same as reduce_stage0
+    if (threadIdx.x == 0) {
+        d_odata[blockIdx.x] = smem[0];
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -164,14 +178,26 @@ __global__ void reduce_stage2(const float* d_idata, float* d_odata, int n)
 
     extern __shared__ float smem[];
 
-    int idx = 0;
+    int idx = blockDim.x * blockIdx.x + threadIdx.x;
+
+    if (idx < n) {
+        smem[threadIdx.x] = d_idata[idx];
+    }
 
     // This is the part that differes from reduce_stage1
     // Reduce within block with coalesced indexing pattern and avoid bank conflicts
     // Change the for-loop to use indexing that reduces warp-divergence
     // Start from blockDim.x / 2 and divide by 2 until we hit 1
-
+    for (int c = blockDim.x / 2 ; c > 0 ; c >>= 1) {
+        if (threadIdx.x < c) {
+            smem[threadIdx.x] += smem[threadIdx.x + c];
+        }
+        __syncthreads();
+    }
     // Copy result of reduction to global memory - Same as reduce_stage1
+    if (threadIdx.x == 0) {
+        d_odata[blockIdx.x] = smem[0];
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
